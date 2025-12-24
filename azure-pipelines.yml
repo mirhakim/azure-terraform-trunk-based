@@ -19,6 +19,15 @@ steps:
   inputs:
     terraformVersion: $(TF_VERSION)
 
+- task: AzureCLI@2
+  displayName: 'Azure Login'
+  inputs:
+    azureSubscription: 'azure-terraform-conn'
+    scriptType: bash
+    scriptLocation: inlineScript
+    inlineScript: |
+      az account show
+
 - script: terraform fmt -check -recursive
   displayName: 'Terraform Format Check'
 
