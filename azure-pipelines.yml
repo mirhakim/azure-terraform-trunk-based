@@ -47,4 +47,7 @@ steps:
     environmentServiceNameAzureRM: 'azure-terraform-conn'
     commandOptions: >
       -input=false
+      -var="location=$(LOCATION)"
+      -var="rg_name=$(RG_NAME)"
+      -var="admin_username=$(ADMIN_USERNAME)"
       -var="admin_password=$(ADMIN_PASSWORD)"
