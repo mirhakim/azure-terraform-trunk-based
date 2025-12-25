@@ -53,3 +53,33 @@ steps:
       -var="rg_name=$(RG_NAME)"
       -var="admin_username=$(ADMIN_USERNAME)"
       -var="admin_password=$(ADMIN_PASSWORD)"
+
+- stage: Apply
+  displayName: 'Terraform Apply (Dev)'
+  dependsOn: Plan
+  condition: succeeded()
+  jobs:
+    - deployment: ApplyInfra
+      displayName: 'Apply Terraform Infra'
+      environment: dev   # enables approval gate
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+              - task: TerraformTaskV4@4
+                displayName: 'Terraform Apply'
+                inputs:
+                  provider: 'azurerm'
+                  command: 'apply'
+                  workingDirectory: 'environments/dev'
+                  environmentServiceNameAzureRM: 'azure-terraform-conn'
+                  commandOptions: >
+                    -auto-approve
+                    -input=false
+                    -var="location=$(LOCATION)"
+                    -var="rg_name=$(RG_NAME)"
+                    -var="admin_username=$(ADMIN_USERNAME)"
+                    -var="admin_password=$(ADMIN_PASSWORD)"
+
+
+
