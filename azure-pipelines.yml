@@ -67,7 +67,7 @@ stages:
   jobs:
     - deployment: ApplyInfra
       displayName: 'Apply Terraform Infra'
-      environment: dev   # enables approval gate
+      environment: dev
       pool:
         name: local-agent-pool
       strategy:
@@ -75,6 +75,20 @@ stages:
           deploy:
             steps:
               - checkout: self
+
+              # 🔑 REQUIRED INIT AGAIN
+              - task: TerraformTaskV4@4
+                displayName: 'Terraform Init (Apply)'
+                inputs:
+                  provider: 'azurerm'
+                  command: 'init'
+                  workingDirectory: 'environments/dev'
+                  backendServiceArm: 'azure-terraform-conn'
+                  backendAzureRmResourceGroupName: 'rg-tf-backend'
+                  backendAzureRmStorageAccountName: 'tfstatemirhakim01'
+                  backendAzureRmContainerName: 'tfstate'
+                  backendAzureRmKey: 'dev.terraform.tfstate'
+                  commandOptions: '-reconfigure'
 
               - task: TerraformTaskV4@4
                 displayName: 'Terraform Apply'
