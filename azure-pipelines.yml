@@ -30,6 +30,8 @@ steps:
     backendAzureRmStorageAccountName: 'tfstatemirhakim01'
     backendAzureRmContainerName: 'tfstate'
     backendAzureRmKey: 'dev.terraform.tfstate'
+    commandOptions: '-reconfigure'
+
 
 - task: TerraformTaskV4@4
   displayName: 'Terraform Validate (Dev)'
