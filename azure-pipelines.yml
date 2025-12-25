@@ -45,3 +45,6 @@ steps:
     command: 'plan'
     workingDirectory: 'environments/dev'
     environmentServiceNameAzureRM: 'azure-terraform-conn'
+    commandOptions: >
+      -input=false
+      -var="admin_password=$(ADMIN_PASSWORD)"
