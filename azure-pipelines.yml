@@ -1,59 +1,65 @@
 trigger:
-  branches:
-    include:
-      - main
-
-pr:
-  branches:
-    include:
-      - main
-
-pool:
-  name: 'local-agent-pool'
+- main
 
 variables:
-  TF_VERSION: '1.6.6'
+  LOCATION: eastus
+  RG_NAME: rg-dev-terraform
+  ADMIN_USERNAME: azureuser
+  # ADMIN_PASSWORD is stored as secret in pipeline UI
 
-steps:
-- task: TerraformInstaller@1
-  inputs:
-    terraformVersion: $(TF_VERSION)
+stages:
 
-- task: TerraformTaskV4@4
-  displayName: 'Terraform Init (Dev)'
-  inputs:
-    provider: 'azurerm'
-    command: 'init'
-    workingDirectory: 'environments/dev'
-    backendServiceArm: 'azure-terraform-conn'
-    backendAzureRmResourceGroupName: 'rg-tf-backend'
-    backendAzureRmStorageAccountName: 'tfstatemirhakim01'
-    backendAzureRmContainerName: 'tfstate'
-    backendAzureRmKey: 'dev.terraform.tfstate'
-    commandOptions: '-reconfigure'
-
-
-- task: TerraformTaskV4@4
-  displayName: 'Terraform Validate (Dev)'
-  inputs:
-    provider: 'azurerm'
-    command: 'validate'
-    workingDirectory: 'environments/dev'
-
-- task: TerraformTaskV4@4
+# ---------------- CI STAGE ----------------
+- stage: Plan
   displayName: 'Terraform Plan (Dev)'
-  inputs:
-    provider: 'azurerm'
-    command: 'plan'
-    workingDirectory: 'environments/dev'
-    environmentServiceNameAzureRM: 'azure-terraform-conn'
-    commandOptions: >
-      -input=false
-      -var="location=$(LOCATION)"
-      -var="rg_name=$(RG_NAME)"
-      -var="admin_username=$(ADMIN_USERNAME)"
-      -var="admin_password=$(ADMIN_PASSWORD)"
+  jobs:
+    - job: TerraformPlan
+      displayName: 'Terraform Plan'
+      pool:
+        name: local-agent-pool
+      steps:
+        - checkout: self
 
+        - task: TerraformInstaller@1
+          displayName: 'Install Terraform'
+          inputs:
+            terraformVersion: '1.6.6'
+
+        - task: TerraformTaskV4@4
+          displayName: 'Terraform Init'
+          inputs:
+            provider: 'azurerm'
+            command: 'init'
+            workingDirectory: 'environments/dev'
+            backendServiceArm: 'azure-terraform-conn'
+            backendAzureRmResourceGroupName: 'rg-tf-backend'
+            backendAzureRmStorageAccountName: 'tfstatemirhakim01'
+            backendAzureRmContainerName: 'tfstate'
+            backendAzureRmKey: 'dev.terraform.tfstate'
+            commandOptions: '-reconfigure'
+
+        - task: TerraformTaskV4@4
+          displayName: 'Terraform Validate'
+          inputs:
+            provider: 'azurerm'
+            command: 'validate'
+            workingDirectory: 'environments/dev'
+
+        - task: TerraformTaskV4@4
+          displayName: 'Terraform Plan'
+          inputs:
+            provider: 'azurerm'
+            command: 'plan'
+            workingDirectory: 'environments/dev'
+            environmentServiceNameAzureRM: 'azure-terraform-conn'
+            commandOptions: >
+              -input=false
+              -var="location=$(LOCATION)"
+              -var="rg_name=$(RG_NAME)"
+              -var="admin_username=$(ADMIN_USERNAME)"
+              -var="admin_password=$(ADMIN_PASSWORD)"
+
+# ---------------- CD STAGE ----------------
 - stage: Apply
   displayName: 'Terraform Apply (Dev)'
   dependsOn: Plan
@@ -62,10 +68,14 @@ steps:
     - deployment: ApplyInfra
       displayName: 'Apply Terraform Infra'
       environment: dev   # enables approval gate
+      pool:
+        name: local-agent-pool
       strategy:
         runOnce:
           deploy:
             steps:
+              - checkout: self
+
               - task: TerraformTaskV4@4
                 displayName: 'Terraform Apply'
                 inputs:
@@ -80,6 +90,3 @@ steps:
                     -var="rg_name=$(RG_NAME)"
                     -var="admin_username=$(ADMIN_USERNAME)"
                     -var="admin_password=$(ADMIN_PASSWORD)"
-
-
-
