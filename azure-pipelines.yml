@@ -27,7 +27,7 @@ steps:
     workingDirectory: 'environments/dev'
     backendServiceArm: 'azure-terraform-conn'
     backendAzureRmResourceGroupName: 'rg-tf-backend'
-    backendAzureRmStorageAccountName: 'tfterraformstate01'
+    backendAzureRmStorageAccountName: 'tfstatemirhakim01'
     backendAzureRmContainerName: 'tfstate'
     backendAzureRmKey: 'dev.terraform.tfstate'
 
