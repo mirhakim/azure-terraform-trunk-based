@@ -11,7 +11,6 @@ pr:
 pool:
   name: 'local-agent-pool'
 
-
 variables:
   TF_VERSION: '1.6.6'
 
@@ -20,26 +19,29 @@ steps:
   inputs:
     terraformVersion: $(TF_VERSION)
 
-- task: AzureCLI@2
-  displayName: 'Azure Login'
-  inputs:
-    azureSubscription: 'azure-terraform-conn'
-    scriptType: bash
-    scriptLocation: inlineScript
-    inlineScript: |
-      az account show
-
-- script: terraform fmt -check -recursive
-  displayName: 'Terraform Format Check'
-
-- script: terraform init
-  workingDirectory: environments/dev
+- task: TerraformTaskV4@4
   displayName: 'Terraform Init (Dev)'
+  inputs:
+    provider: 'azurerm'
+    command: 'init'
+    workingDirectory: 'environments/dev'
+    backendServiceArm: 'azure-terraform-conn'
+    backendAzureRmResourceGroupName: 'rg-tf-backend'
+    backendAzureRmStorageAccountName: 'tfterraformstate01'
+    backendAzureRmContainerName: 'tfstate'
+    backendAzureRmKey: 'dev.terraform.tfstate'
 
-- script: terraform validate
-  workingDirectory: environments/dev
+- task: TerraformTaskV4@4
   displayName: 'Terraform Validate (Dev)'
+  inputs:
+    provider: 'azurerm'
+    command: 'validate'
+    workingDirectory: 'environments/dev'
 
-- script: terraform plan
-  workingDirectory: environments/dev
+- task: TerraformTaskV4@4
   displayName: 'Terraform Plan (Dev)'
+  inputs:
+    provider: 'azurerm'
+    command: 'plan'
+    workingDirectory: 'environments/dev'
+    environmentServiceNameAzureRM: 'azure-terraform-conn'
