@@ -76,6 +76,7 @@ stages:
             steps:
               - checkout: self
 
+              # 🔑 REQUIRED INIT AGAIN
               - task: TerraformTaskV4@4
                 displayName: 'Terraform Init (Apply)'
                 inputs:
