@@ -22,21 +22,15 @@ stages:
       steps:
         - checkout: self
 
-        # Install Terraform
         - task: TerraformInstaller@1
           displayName: 'Install Terraform'
           inputs:
             terraformVersion: '1.6.6'
 
-        # Terraform Format
-        - task: TerraformTaskV4@4
-          displayName: 'Terraform Format'
-          inputs:
-            provider: 'azurerm'
-            command: 'fmt'
-            workingDirectory: 'environments/dev'
+        - script: |
+            terraform fmt -check -recursive environments/dev
+          displayName: 'Terraform Format Check'
 
-        # Terraform Validate
         - task: TerraformTaskV4@4
           displayName: 'Terraform Validate'
           inputs:
@@ -44,12 +38,12 @@ stages:
             command: 'validate'
             workingDirectory: 'environments/dev'
 
-        # DevSecOps Security Scan (Checkov)
         - script: |
             python -m pip install --upgrade pip
             pip install checkov
             checkov -d environments/dev --framework terraform
           displayName: 'Terraform Security Scan (Checkov)'
+
 
 # =====================================================
 # STAGE 1: PLAN & REVIEW
