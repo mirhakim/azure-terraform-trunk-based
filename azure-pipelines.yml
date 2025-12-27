@@ -5,13 +5,59 @@ variables:
   LOCATION: eastus
   RG_NAME: rg-dev-terraform
   ADMIN_USERNAME: azureuser
-  # ADMIN_PASSWORD is stored as secret in pipeline UI
+  # ADMIN_PASSWORD must be stored as SECRET in Azure DevOps pipeline variables
 
 stages:
 
-# ---------------- CI STAGE ----------------
+# =====================================================
+# STAGE 0: PRE-COMMIT / STATIC ANALYSIS (CI)
+# =====================================================
+- stage: PreCommit_Static
+  displayName: 'Pre-Commit / Static Analysis'
+  jobs:
+    - job: StaticChecks
+      displayName: 'Terraform Static & Security Checks'
+      pool:
+        name: local-agent-pool
+      steps:
+        - checkout: self
+
+        # Install Terraform
+        - task: TerraformInstaller@1
+          displayName: 'Install Terraform'
+          inputs:
+            terraformVersion: '1.6.6'
+
+        # Terraform Format
+        - task: TerraformTaskV4@4
+          displayName: 'Terraform Format'
+          inputs:
+            provider: 'azurerm'
+            command: 'fmt'
+            workingDirectory: 'environments/dev'
+
+        # Terraform Validate
+        - task: TerraformTaskV4@4
+          displayName: 'Terraform Validate'
+          inputs:
+            provider: 'azurerm'
+            command: 'validate'
+            workingDirectory: 'environments/dev'
+
+        # DevSecOps Security Scan (Checkov)
+        - script: |
+            python -m pip install --upgrade pip
+            pip install checkov
+            checkov -d environments/dev --framework terraform
+          displayName: 'Terraform Security Scan (Checkov)'
+
+# =====================================================
+# STAGE 1: PLAN & REVIEW
+# =====================================================
 - stage: Plan
-  displayName: 'Terraform Plan (Dev)'
+  displayName: 'Terraform Plan & Review'
+  dependsOn: PreCommit_Static
+  condition: succeeded()
   jobs:
     - job: TerraformPlan
       displayName: 'Terraform Plan'
@@ -20,11 +66,13 @@ stages:
       steps:
         - checkout: self
 
+        # Install Terraform
         - task: TerraformInstaller@1
           displayName: 'Install Terraform'
           inputs:
             terraformVersion: '1.6.6'
 
+        # Terraform Init
         - task: TerraformTaskV4@4
           displayName: 'Terraform Init'
           inputs:
@@ -38,13 +86,7 @@ stages:
             backendAzureRmKey: 'dev.terraform.tfstate'
             commandOptions: '-reconfigure'
 
-        - task: TerraformTaskV4@4
-          displayName: 'Terraform Validate'
-          inputs:
-            provider: 'azurerm'
-            command: 'validate'
-            workingDirectory: 'environments/dev'
-
+        # Terraform Plan
         - task: TerraformTaskV4@4
           displayName: 'Terraform Plan'
           inputs:
@@ -59,15 +101,17 @@ stages:
               -var="admin_username=$(ADMIN_USERNAME)"
               -var="admin_password=$(ADMIN_PASSWORD)"
 
-# ---------------- CD STAGE ----------------
+# =====================================================
+# STAGE 2: APPLY (CD – APPROVAL REQUIRED)
+# =====================================================
 - stage: Apply
   displayName: 'Terraform Apply (Dev)'
   dependsOn: Plan
   condition: succeeded()
   jobs:
     - deployment: ApplyInfra
-      displayName: 'Apply Terraform Infra'
-      environment: dev
+      displayName: 'Apply Terraform Infrastructure'
+      environment: dev   # 🔐 Manual approval + governance
       pool:
         name: local-agent-pool
       strategy:
@@ -76,7 +120,7 @@ stages:
             steps:
               - checkout: self
 
-              # 🔑 REQUIRED INIT AGAIN
+              # Terraform Init (required again on new job)
               - task: TerraformTaskV4@4
                 displayName: 'Terraform Init (Apply)'
                 inputs:
@@ -90,6 +134,7 @@ stages:
                   backendAzureRmKey: 'dev.terraform.tfstate'
                   commandOptions: '-reconfigure'
 
+              # Terraform Apply
               - task: TerraformTaskV4@4
                 displayName: 'Terraform Apply'
                 inputs:
