@@ -22,15 +22,27 @@ stages:
       steps:
         - checkout: self
 
+        # Install Terraform
         - task: TerraformInstaller@1
           displayName: 'Install Terraform'
           inputs:
             terraformVersion: '1.6.6'
 
+        # Terraform Init (NO backend, CI safe)
+        - task: TerraformTaskV4@4
+          displayName: 'Terraform Init (Pre-Commit)'
+          inputs:
+            provider: 'azurerm'
+            command: 'init'
+            workingDirectory: 'environments/dev'
+            commandOptions: '-backend=false'
+
+        # Terraform Format Check
         - script: |
             terraform fmt -check -recursive environments/dev
           displayName: 'Terraform Format Check'
 
+        # Terraform Validate
         - task: TerraformTaskV4@4
           displayName: 'Terraform Validate'
           inputs:
@@ -38,12 +50,12 @@ stages:
             command: 'validate'
             workingDirectory: 'environments/dev'
 
+        # DevSecOps Security Scan (Checkov)
         - script: |
             python -m pip install --upgrade pip
             pip install checkov
             checkov -d environments/dev --framework terraform
           displayName: 'Terraform Security Scan (Checkov)'
-
 
 # =====================================================
 # STAGE 1: PLAN & REVIEW
@@ -66,7 +78,7 @@ stages:
           inputs:
             terraformVersion: '1.6.6'
 
-        # Terraform Init
+        # Terraform Init (REMOTE backend)
         - task: TerraformTaskV4@4
           displayName: 'Terraform Init'
           inputs:
@@ -114,7 +126,7 @@ stages:
             steps:
               - checkout: self
 
-              # Terraform Init (required again on new job)
+              # Terraform Init (required again)
               - task: TerraformTaskV4@4
                 displayName: 'Terraform Init (Apply)'
                 inputs:
