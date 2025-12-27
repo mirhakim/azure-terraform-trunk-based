@@ -28,12 +28,12 @@ module "nsg" {
 }
 
 module "vm" {
-  source           = "../../modules/vm"
-  vm_name          = "vm-dev-01"
-  location         = var.location
-  rg_name          = var.rg_name
-  subnet_id        = module.subnet.id
-  vm_size          = "Standard_B1s"
-  admin_username   = var.admin_username
-  admin_password   = var.admin_password
+  source         = "../../modules/vm"
+  vm_name        = "vm-dev-01"
+  location       = var.location
+  rg_name        = var.rg_name
+  subnet_id      = module.subnet.id
+  vm_size        = "Standard_B1s"
+  admin_username = var.admin_username
+  admin_password = var.admin_password
 }
