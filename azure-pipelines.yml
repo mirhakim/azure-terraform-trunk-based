@@ -1,26 +1,26 @@
 trigger:
 - main
 
-pool:
-  name: local-agent-pool   # your Windows self-hosted agent
-
 variables:
   LOCATION: eastus
   RG_NAME: rg-dev-terraform
   ADMIN_USERNAME: azureuser
-  # ADMIN_PASSWORD -> set as SECRET pipeline variable
-  # INFRACOST_API_KEY -> set as SECRET pipeline variable
+  # ADMIN_PASSWORD -> secret pipeline variable
+  # INFRACOST_API_KEY -> secret pipeline variable
 
 stages:
 
 # =====================================================
-# STAGE 1: PRE-COMMIT / STATIC & SECURITY ANALYSIS
+# STAGE 1: PRE-COMMIT / STATIC & SECURITY
 # =====================================================
 - stage: PreCommit
   displayName: 'Pre-Commit / Static & Security Analysis'
   jobs:
   - job: StaticSecurity
     displayName: 'Terraform Static & Security'
+    pool:
+      name: local-agent-pool
+
     steps:
     - checkout: self
 
@@ -29,28 +29,24 @@ stages:
       inputs:
         terraformVersion: '1.6.6'
 
-    # -------- Terraform Init (NO backend for linting) --------
-    - task: TerraformTaskV4@4
+    # ✅ CORRECT: Init WITHOUT backend (CLI, not TerraformTaskV4)
+    - script: terraform init -backend=false
       displayName: 'Terraform Init (No Backend)'
-      inputs:
-        provider: azurerm
-        command: init
-        workingDirectory: environments/dev
-        commandOptions: '-backend=false'
+      workingDirectory: environments/dev
 
-    # -------- Terraform Format Check --------
-    - script: terraform fmt -check -recursive environments/dev
+    # ✅ Format (non-blocking)
+    - script: terraform fmt -check -recursive
       displayName: 'Terraform Format Check'
+      workingDirectory: environments/dev
       continueOnError: true
 
-    # -------- Terraform Validate --------
+    # ✅ Validate
     - script: terraform validate
       displayName: 'Terraform Validate'
       workingDirectory: environments/dev
 
-    # -------- Checkov Scan (NON BLOCKING) --------
+    # ✅ Checkov (non-blocking, GREEN stage)
     - powershell: |
-        Write-Host "Running Checkov (non-blocking)..."
         pip install --quiet checkov
         checkov -d environments/dev --framework terraform
         exit 0
@@ -58,43 +54,47 @@ stages:
       continueOnError: true
 
 # =====================================================
-# STAGE 2: COST & IMPACT ASSESSMENT (INFRACOST)
+# STAGE 2: COST ESTIMATION (INFRACOST) - NON BLOCKING
 # =====================================================
 - stage: Cost
   displayName: 'Cost & Impact Assessment (Infracost)'
   dependsOn: PreCommit
   condition: succeeded()
+
   jobs:
   - job: Infracost
     displayName: 'Infracost Cost Estimation'
+    pool:
+      name: local-agent-pool
+
     steps:
     - checkout: self
 
     - powershell: |
-        if (-not $env:INFRACOST_API_KEY) {
-          Write-Host "INFRACOST_API_KEY not set. Skipping."
-          exit 0
-        }
-
         docker run --rm `
-          -e INFRACOST_API_KEY=$env:INFRACOST_API_KEY `
+          -e INFRACOST_API_KEY=$(INFRACOST_API_KEY) `
           -v ${PWD}:/tf `
           infracost/infracost breakdown `
           --path /tf/environments/dev `
           --format table
+        exit 0
       displayName: 'Run Infracost Cost Breakdown'
       continueOnError: true
 
 # =====================================================
-# STAGE 3: TERRAFORM PLAN
+# STAGE 3: TERRAFORM PLAN (REMOTE BACKEND)
 # =====================================================
 - stage: Plan
-  displayName: 'Terraform Plan'
+  displayName: 'Terraform Plan (Dev)'
   dependsOn: Cost
   condition: succeeded()
+
   jobs:
   - job: TerraformPlan
     displayName: 'Terraform Plan'
+    pool:
+      name: local-agent-pool
+
     steps:
     - checkout: self
 
@@ -103,6 +103,7 @@ stages:
       inputs:
         terraformVersion: '1.6.6'
 
+    # ✅ Init WITH backend
     - task: TerraformTaskV4@4
       displayName: 'Terraform Init'
       inputs:
@@ -114,6 +115,7 @@ stages:
         backendAzureRmStorageAccountName: tfstatemirhakim01
         backendAzureRmContainerName: tfstate
         backendAzureRmKey: dev.terraform.tfstate
+        commandOptions: '-reconfigure'
 
     - task: TerraformTaskV4@4
       displayName: 'Terraform Plan'
@@ -130,16 +132,20 @@ stages:
           -var="admin_password=$(ADMIN_PASSWORD)"
 
 # =====================================================
-# STAGE 4: TERRAFORM APPLY (APPROVAL REQUIRED)
+# STAGE 4: APPLY (APPROVAL + GOVERNANCE)
 # =====================================================
 - stage: Apply
   displayName: 'Terraform Apply (Dev)'
   dependsOn: Plan
   condition: succeeded()
+
   jobs:
   - deployment: ApplyInfra
     displayName: 'Apply Terraform Infrastructure'
-    environment: dev   # approval enabled here
+    environment: dev   # 🔐 Approval enforced here
+    pool:
+      name: local-agent-pool
+
     strategy:
       runOnce:
         deploy:
@@ -157,6 +163,7 @@ stages:
               backendAzureRmStorageAccountName: tfstatemirhakim01
               backendAzureRmContainerName: tfstate
               backendAzureRmKey: dev.terraform.tfstate
+              commandOptions: '-reconfigure'
 
           - task: TerraformTaskV4@4
             displayName: 'Terraform Apply'
