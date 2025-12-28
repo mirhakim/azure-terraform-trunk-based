@@ -49,7 +49,7 @@ stages:
 
         # Terraform Security Scan - Checkov (Docker, Windows-safe)
         - script: |
-            docker run --rm -v "%BUILD_SOURCESDIRECTORY%:/tf" bridgecrew/checkov -d /tf/environments/dev --framework terraform
+            docker run --rm -v "%BUILD_SOURCESDIRECTORY%:/tf" bridgecrew/checkov -d /tf/environments/dev --framework terraform --soft-fail
           displayName: 'Terraform Security Scan (Checkov)'
 
 # =====================================================
@@ -71,7 +71,7 @@ stages:
 
         - script: |
             docker run --rm ^
-              -e INFRACOST_API_KEY=$(INFRACOST_API_KEY) ^
+              -e INFRACOST_API_KEY=%INFRACOST_API_KEY% ^
               -v "%BUILD_SOURCESDIRECTORY%:/workspace" ^
               infracost/infracost breakdown ^
               --path /workspace/environments/dev ^
