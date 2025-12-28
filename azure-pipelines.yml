@@ -77,6 +77,9 @@ stages:
               --path /workspace/environments/dev ^
               --format table
           displayName: 'Run Infracost Cost Breakdown'
+          env:
+          INFRACOST_API_KEY: $(INFRACOST_API_KEY)
+
 
 # =====================================================
 # STAGE 3: PLAN & REVIEW (REAL BACKEND)
