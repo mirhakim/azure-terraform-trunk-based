@@ -5,18 +5,17 @@ variables:
   LOCATION: eastus
   RG_NAME: rg-dev-terraform
   ADMIN_USERNAME: azureuser
-  # ADMIN_PASSWORD -> mark as SECRET in ADO
-  # INFRACOST_API_KEY -> mark as SECRET in ADO
-
-stages:
+  # ADMIN_PASSWORD → define as SECRET in ADO
+  # INFRACOST_API_KEY → define as SECRET in ADO
 
 # =====================================================
 # STAGE 1: PRE-COMMIT / STATIC & SECURITY ANALYSIS
 # =====================================================
+stages:
 - stage: PreCommit
   displayName: 'Pre-Commit / Static & Security Analysis'
   jobs:
-    - job: StaticSecurity
+    - job: TerraformStaticSecurity
       displayName: 'Terraform Static & Security'
       pool:
         name: local-agent-pool
@@ -45,8 +44,7 @@ stages:
           inputs:
             targetType: 'inline'
             script: |
-              cd environments/dev
-              terraform fmt -check -recursive
+              terraform fmt -check -recursive environments/dev
 
         # Terraform Validate
         - task: PowerShell@2
@@ -64,10 +62,10 @@ stages:
           inputs:
             targetType: 'inline'
             script: |
-              docker run --rm ^
-                -v "$(System.DefaultWorkingDirectory):/tf" ^
-                bridgecrew/checkov ^
-                -d /tf/environments/dev ^
+              docker run --rm `
+                -v "$(System.DefaultWorkingDirectory):/tf" `
+                bridgecrew/checkov `
+                -d /tf/environments/dev `
                 --framework terraform
 
 # =====================================================
@@ -77,7 +75,6 @@ stages:
   displayName: 'Cost & Impact Assessment (Infracost)'
   dependsOn: PreCommit
   condition: succeeded()
-
   jobs:
     - job: Infracost
       displayName: 'Infracost Cost Estimation'
@@ -94,20 +91,21 @@ stages:
           inputs:
             targetType: 'inline'
             script: |
-              docker run --rm ^
-                -e INFRACOST_API_KEY ^
-                -v "$(System.DefaultWorkingDirectory):/tf" ^
-                infracost/infracost ^
+              Write-Host "INFRACOST_API_KEY length = $($env:INFRACOST_API_KEY.Length)"
+
+              docker run --rm `
+                -e INFRACOST_API_KEY=$env:INFRACOST_API_KEY `
+                -v "$(System.DefaultWorkingDirectory):/tf" `
+                infracost/infracost `
                 breakdown --path /tf/environments/dev
 
 # =====================================================
-# STAGE 3: PLAN & REVIEW
+# STAGE 3: TERRAFORM PLAN
 # =====================================================
 - stage: Plan
   displayName: 'Terraform Plan & Review'
   dependsOn: Cost
   condition: succeeded()
-
   jobs:
     - job: TerraformPlan
       displayName: 'Terraform Plan'
@@ -156,7 +154,6 @@ stages:
   displayName: 'Terraform Apply (Dev)'
   dependsOn: Plan
   condition: succeeded()
-
   jobs:
     - deployment: ApplyInfra
       displayName: 'Apply Terraform Infrastructure'
