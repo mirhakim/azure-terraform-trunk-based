@@ -73,6 +73,9 @@ stages:
 # =====================================================
 # STAGE 2: COST & IMPACT ASSESSMENT (INFRACOST)
 # =====================================================
+# =====================================================
+# STAGE: COST & IMPACT ASSESSMENT (INFRACOST)
+# =====================================================
 - stage: Cost
   displayName: 'Cost & Impact Assessment (Infracost)'
   dependsOn: PreCommit
@@ -94,11 +97,12 @@ stages:
           inputs:
             targetType: 'inline'
             script: |
-              docker run --rm ^
-                -e INFRACOST_API_KEY ^
-                -v "$(System.DefaultWorkingDirectory):/tf" ^
-                infracost/infracost ^
+              docker run --rm `
+                -e INFRACOST_API_KEY=$env:INFRACOST_API_KEY `
+                -v "$(System.DefaultWorkingDirectory):/tf" `
+                infracost/infracost `
                 breakdown --path /tf/environments/dev
+
 
 # =====================================================
 # STAGE 3: PLAN & REVIEW
