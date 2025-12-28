@@ -5,133 +5,151 @@ variables:
   LOCATION: eastus
   RG_NAME: rg-dev-terraform
   ADMIN_USERNAME: azureuser
-  # ADMIN_PASSWORD must be stored as SECRET in pipeline variables
+  # ADMIN_PASSWORD -> store as SECRET pipeline variable
+  # INFRACOST_API_KEY -> store as SECRET pipeline variable
 
 stages:
 
 # =====================================================
 # STAGE 1: PRE-COMMIT / STATIC & SECURITY ANALYSIS
 # =====================================================
-- stage: PreCommit_Static
+- stage: PreCommit
   displayName: 'Pre-Commit / Static & Security Analysis'
   jobs:
-    - job: StaticAnalysis
-      displayName: 'Terraform Static & Security'
-      pool:
-        name: local-agent-pool
+  - job: TerraformStaticSecurity
+    displayName: 'Terraform Static & Security'
+    pool:
+      name: local-agent-pool
 
-      steps:
-        - checkout: self
+    steps:
+    - checkout: self
 
-        # Install Terraform
-        - task: TerraformInstaller@1
-          displayName: 'Install Terraform'
-          inputs:
-            terraformVersion: '1.6.6'
+    # Install Terraform
+    - task: TerraformInstaller@1
+      displayName: 'Install Terraform'
+      inputs:
+        terraformVersion: '1.6.6'
 
-        # Terraform Init (NO backend)
-        - script: |
-            terraform init -backend=false
-          workingDirectory: environments/dev
-          displayName: 'Terraform Init (No Backend)'
+    # Terraform Init (NO backend for static checks)
+    - task: TerraformTaskV4@4
+      displayName: 'Terraform Init (No Backend)'
+      inputs:
+        provider: 'azurerm'
+        command: 'init'
+        workingDirectory: 'environments/dev'
+        commandOptions: '-backend=false'
 
-        # Terraform Format Check
-        - script: |
-            terraform fmt -check -recursive
-          workingDirectory: environments/dev
-          displayName: 'Terraform Format Check'
+    # Terraform Format Check
+    - task: PowerShell@2
+      displayName: 'Terraform Format Check'
+      inputs:
+        targetType: 'inline'
+        script: |
+          terraform fmt -check -recursive environments/dev
 
-        # Terraform Validate
-        - script: |
-            terraform validate
-          workingDirectory: environments/dev
-          displayName: 'Terraform Validate'
+    # Terraform Validate
+    - task: TerraformTaskV4@4
+      displayName: 'Terraform Validate'
+      inputs:
+        provider: 'azurerm'
+        command: 'validate'
+        workingDirectory: 'environments/dev'
 
-        # Terraform Security Scan - Checkov (Docker, Windows-safe)
-        - script: |
-            docker run --rm -v "%BUILD_SOURCESDIRECTORY%:/tf" bridgecrew/checkov -d /tf/environments/dev --framework terraform --soft-fail
-          displayName: 'Terraform Security Scan (Checkov)'
+    # Terraform Security Scan (Checkov)
+    - task: PowerShell@2
+      displayName: 'Terraform Security Scan (Checkov)'
+      inputs:
+        targetType: 'inline'
+        script: |
+          docker run --rm `
+            -v "$(Build.SourcesDirectory):/tf" `
+            bridgecrew/checkov `
+            -d /tf/environments/dev `
+            --framework terraform `
+            --soft-fail
 
 # =====================================================
 # STAGE 2: COST & IMPACT ASSESSMENT (INFRACOST)
 # =====================================================
-- stage: Cost_Assessment
+- stage: Cost
   displayName: 'Cost & Impact Assessment (Infracost)'
-  dependsOn: PreCommit_Static
+  dependsOn: PreCommit
   condition: succeeded()
 
   jobs:
-    - job: Infracost
-      displayName: 'Infracost Cost Estimation'
-      pool:
-        name: local-agent-pool
+  - job: Infracost
+    displayName: 'Infracost Cost Estimation'
+    pool:
+      name: local-agent-pool
 
-      steps:
-        - checkout: self
+    steps:
+    - checkout: self
 
-        - script: |
-            docker run --rm ^
-              -e INFRACOST_API_KEY=%INFRACOST_API_KEY% ^
-              -v "%BUILD_SOURCESDIRECTORY%:/workspace" ^
-              infracost/infracost breakdown ^
-              --path /workspace/environments/dev ^
-              --format table
-          displayName: 'Run Infracost Cost Breakdown'
-          
+    - task: PowerShell@2
+      displayName: 'Run Infracost Cost Breakdown'
+      inputs:
+        targetType: 'inline'
+        script: |
+          docker run --rm `
+            -e INFRACOST_API_KEY=$env:INFRACOST_API_KEY `
+            -v "$(Build.SourcesDirectory):/workspace" `
+            infracost/infracost breakdown `
+            --path /workspace/environments/dev `
+            --format table
+      env:
+        INFRACOST_API_KEY: $(INFRACOST_API_KEY)
+
 # =====================================================
-# STAGE 3: PLAN & REVIEW (REAL BACKEND)
+# STAGE 3: PLAN & REVIEW
 # =====================================================
 - stage: Plan
   displayName: 'Terraform Plan & Review'
-  dependsOn: Cost_Assessment
+  dependsOn: Cost
   condition: succeeded()
 
   jobs:
-    - job: TerraformPlan
+  - job: TerraformPlan
+    displayName: 'Terraform Plan'
+    pool:
+      name: local-agent-pool
+
+    steps:
+    - checkout: self
+
+    - task: TerraformInstaller@1
+      displayName: 'Install Terraform'
+      inputs:
+        terraformVersion: '1.6.6'
+
+    - task: TerraformTaskV4@4
+      displayName: 'Terraform Init'
+      inputs:
+        provider: 'azurerm'
+        command: 'init'
+        workingDirectory: 'environments/dev'
+        backendServiceArm: 'azure-terraform-conn'
+        backendAzureRmResourceGroupName: 'rg-tf-backend'
+        backendAzureRmStorageAccountName: 'tfstatemirhakim01'
+        backendAzureRmContainerName: 'tfstate'
+        backendAzureRmKey: 'dev.terraform.tfstate'
+        commandOptions: '-reconfigure'
+
+    - task: TerraformTaskV4@4
       displayName: 'Terraform Plan'
-      pool:
-        name: local-agent-pool
-
-      steps:
-        - checkout: self
-
-        - task: TerraformInstaller@1
-          displayName: 'Install Terraform'
-          inputs:
-            terraformVersion: '1.6.6'
-
-        # Terraform Init WITH backend
-        - task: TerraformTaskV4@4
-          displayName: 'Terraform Init (Backend)'
-          inputs:
-            provider: 'azurerm'
-            command: 'init'
-            workingDirectory: 'environments/dev'
-            backendServiceArm: 'azure-terraform-conn'
-            backendAzureRmResourceGroupName: 'rg-tf-backend'
-            backendAzureRmStorageAccountName: 'tfstatemirhakim01'
-            backendAzureRmContainerName: 'tfstate'
-            backendAzureRmKey: 'dev.terraform.tfstate'
-            commandOptions: '-reconfigure'
-
-        # Terraform Plan
-        - task: TerraformTaskV4@4
-          displayName: 'Terraform Plan'
-          inputs:
-            provider: 'azurerm'
-            command: 'plan'
-            workingDirectory: 'environments/dev'
-            environmentServiceNameAzureRM: 'azure-terraform-conn'
-            commandOptions: >
-              -input=false
-              -var="location=$(LOCATION)"
-              -var="rg_name=$(RG_NAME)"
-              -var="admin_username=$(ADMIN_USERNAME)"
-              -var="admin_password=$(ADMIN_PASSWORD)"
-
+      inputs:
+        provider: 'azurerm'
+        command: 'plan'
+        workingDirectory: 'environments/dev'
+        environmentServiceNameAzureRM: 'azure-terraform-conn'
+        commandOptions: >
+          -input=false
+          -var="location=$(LOCATION)"
+          -var="rg_name=$(RG_NAME)"
+          -var="admin_username=$(ADMIN_USERNAME)"
+          -var="admin_password=$(ADMIN_PASSWORD)"
 
 # =====================================================
-# STAGE 4: APPLY (MANUAL APPROVAL REQUIRED)
+# STAGE 4: APPLY (APPROVAL REQUIRED)
 # =====================================================
 - stage: Apply
   displayName: 'Terraform Apply (Dev)'
@@ -139,44 +157,42 @@ stages:
   condition: succeeded()
 
   jobs:
-    - deployment: ApplyInfra
-      displayName: 'Apply Terraform Infrastructure'
-      environment: dev   # 🔐 Environment approval gate
-      pool:
-        name: local-agent-pool
+  - deployment: ApplyInfra
+    displayName: 'Apply Terraform Infrastructure'
+    environment: dev   # 🔐 approval gate
+    pool:
+      name: local-agent-pool
 
-      strategy:
-        runOnce:
-          deploy:
-            steps:
-              - checkout: self
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: self
 
-              # Terraform Init again (REQUIRED)
-              - task: TerraformTaskV4@4
-                displayName: 'Terraform Init (Apply)'
-                inputs:
-                  provider: 'azurerm'
-                  command: 'init'
-                  workingDirectory: 'environments/dev'
-                  backendServiceArm: 'azure-terraform-conn'
-                  backendAzureRmResourceGroupName: 'rg-tf-backend'
-                  backendAzureRmStorageAccountName: 'tfstatemirhakim01'
-                  backendAzureRmContainerName: 'tfstate'
-                  backendAzureRmKey: 'dev.terraform.tfstate'
-                  commandOptions: '-reconfigure'
+          - task: TerraformTaskV4@4
+            displayName: 'Terraform Init (Apply)'
+            inputs:
+              provider: 'azurerm'
+              command: 'init'
+              workingDirectory: 'environments/dev'
+              backendServiceArm: 'azure-terraform-conn'
+              backendAzureRmResourceGroupName: 'rg-tf-backend'
+              backendAzureRmStorageAccountName: 'tfstatemirhakim01'
+              backendAzureRmContainerName: 'tfstate'
+              backendAzureRmKey: 'dev.terraform.tfstate'
+              commandOptions: '-reconfigure'
 
-              # Terraform Apply
-              - task: TerraformTaskV4@4
-                displayName: 'Terraform Apply'
-                inputs:
-                  provider: 'azurerm'
-                  command: 'apply'
-                  workingDirectory: 'environments/dev'
-                  environmentServiceNameAzureRM: 'azure-terraform-conn'
-                  commandOptions: >
-                    -auto-approve
-                    -input=false
-                    -var="location=$(LOCATION)"
-                    -var="rg_name=$(RG_NAME)"
-                    -var="admin_username=$(ADMIN_USERNAME)"
-                    -var="admin_password=$(ADMIN_PASSWORD)"
+          - task: TerraformTaskV4@4
+            displayName: 'Terraform Apply'
+            inputs:
+              provider: 'azurerm'
+              command: 'apply'
+              workingDirectory: 'environments/dev'
+              environmentServiceNameAzureRM: 'azure-terraform-conn'
+              commandOptions: >
+                -auto-approve
+                -input=false
+                -var="location=$(LOCATION)"
+                -var="rg_name=$(RG_NAME)"
+                -var="admin_username=$(ADMIN_USERNAME)"
+                -var="admin_password=$(ADMIN_PASSWORD)"
