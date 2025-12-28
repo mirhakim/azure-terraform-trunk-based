@@ -52,13 +52,38 @@ stages:
             docker run --rm -v "%BUILD_SOURCESDIRECTORY%:/tf" bridgecrew/checkov -d /tf/environments/dev --framework terraform
           displayName: 'Terraform Security Scan (Checkov)'
 
+# =====================================================
+# STAGE 2: COST & IMPACT ASSESSMENT (INFRACOST)
+# =====================================================
+- stage: Cost_Assessment
+  displayName: 'Cost & Impact Assessment (Infracost)'
+  dependsOn: PreCommit_Static
+  condition: succeeded()
+
+  jobs:
+    - job: Infracost
+      displayName: 'Infracost Cost Estimation'
+      pool:
+        name: local-agent-pool
+
+      steps:
+        - checkout: self
+
+        - script: |
+            docker run --rm ^
+              -e INFRACOST_API_KEY=$(INFRACOST_API_KEY) ^
+              -v "%BUILD_SOURCESDIRECTORY%:/workspace" ^
+              infracost/infracost breakdown ^
+              --path /workspace/environments/dev ^
+              --format table
+          displayName: 'Run Infracost Cost Breakdown'
 
 # =====================================================
-# STAGE 2: PLAN & REVIEW (REAL BACKEND)
+# STAGE 3: PLAN & REVIEW (REAL BACKEND)
 # =====================================================
 - stage: Plan
   displayName: 'Terraform Plan & Review'
-  dependsOn: PreCommit_Static
+  dependsOn: Cost_Assessment
   condition: succeeded()
 
   jobs:
@@ -106,7 +131,7 @@ stages:
 
 
 # =====================================================
-# STAGE 3: APPLY (MANUAL APPROVAL REQUIRED)
+# STAGE 4: APPLY (MANUAL APPROVAL REQUIRED)
 # =====================================================
 - stage: Apply
   displayName: 'Terraform Apply (Dev)'
