@@ -85,36 +85,42 @@ stages:
   displayName: 'Cost & Impact Assessment (Infracost)'
   dependsOn: PreCommit
   condition: succeeded()
+
   jobs:
     - job: Infracost
       displayName: 'Infracost Cost Estimation'
       pool:
         name: local-agent-pool
 
+      variables:
+        INFRAOST_API_KEY: $(INFRAOST_API_KEY)
+
       steps:
         - checkout: self
 
         - powershell: |
-            if (-not $env:INFRACOST_API_KEY) {
-              Write-Host "INFRACOST_API_KEY not set. Skipping Infracost."
+            Write-Host "Starting Infracost Cost Breakdown"
+
+            if (-not $env:INFRAOST_API_KEY) {
+              Write-Host "INFRAOST_API_KEY not set. Skipping Infracost."
               exit 0
             }
 
-            if (Get-Command docker -ErrorAction SilentlyContinue) {
-              docker run --rm `
-                -e INFRACOST_API_KEY=$env:INFRACOST_API_KEY `
-                -v ${PWD}:/tf `
-                infracost/infracost breakdown `
-                --path /tf/environments/dev `
-                --format table
-            }
-            else {
+            if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
               Write-Host "Docker not available. Skipping Infracost."
+              exit 0
             }
 
-            exit 0
+            docker run --rm `
+              -e INFRAOST_API_KEY=$env:INFRAOST_API_KEY `
+              -v ${PWD}:/tf `
+              infracost/infracost breakdown `
+              --path /tf/environments/dev `
+              --format table
+
           displayName: 'Run Infracost Cost Breakdown'
           continueOnError: true
+
 
 # =====================================================
 # STAGE 3: PLAN & REVIEW
