@@ -79,7 +79,7 @@ stages:
           continueOnError: true
 
 # =====================================================
-# STAGE 2: COST & IMPACT ASSESSMENT (INFRACOST)
+# STAGE 2: COST & IMPACT ASSESSMENT (INFRACOST - CLI)
 # =====================================================
 - stage: Cost
   displayName: 'Cost & Impact Assessment (Infracost)'
@@ -95,26 +95,31 @@ stages:
       steps:
         - checkout: self
 
+        # Install Infracost CLI
         - powershell: |
-            Write-Host "Starting Infracost Cost Breakdown"
+            Write-Host "Installing Infracost CLI"
+
+            $infracostUrl = "https://github.com/infracost/infracost/releases/latest/download/infracost-windows-amd64.exe"
+            $dest = "$env:AGENT_TEMPDIRECTORY\infracost.exe"
+
+            Invoke-WebRequest -Uri $infracostUrl -OutFile $dest
+            Copy-Item $dest "C:\Windows\System32\infracost.exe" -Force
+
+            infracost --version
+          displayName: 'Install Infracost CLI'
+
+        # Run Cost Breakdown
+        - powershell: |
+            Write-Host "Running Infracost Cost Breakdown"
 
             if (-not $env:INFRAOST_API_KEY) {
               Write-Host "INFRAOST_API_KEY not set. Skipping Infracost."
               exit 0
             }
 
-            if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-              Write-Host "Docker not available. Skipping Infracost."
-              exit 0
-            }
-
-            docker run --rm `
-              -e INFRAOST_API_KEY=$env:INFRAOST_API_KEY `
-              -v ${PWD}:/tf `
-              infracost/infracost breakdown `
-              --path /tf/environments/dev `
+            infracost breakdown `
+              --path environments/dev `
               --format table
-
           displayName: 'Run Infracost Cost Breakdown'
           env:
             INFRAOST_API_KEY: $(INFRAOST_API_KEY)
