@@ -7,124 +7,88 @@ variables:
   ADMIN_USERNAME: azureuser
   TF_VERSION: 1.6.6
 
+############################################
+# STAGE 1: PRE-COMMIT / STATIC & SECURITY
+############################################
 stages:
-
-# =====================================================
-# STAGE 1: PRE-COMMIT / STATIC & SECURITY ANALYSIS
-# =====================================================
 - stage: PreCommit
   displayName: 'Pre-Commit / Static & Security Analysis'
   jobs:
-  - job: TerraformStaticSecurity
+  - job: StaticSecurity
     displayName: 'Terraform Static & Security'
     pool:
-      name: local-agent-pool
+      vmImage: ubuntu-latest
 
     steps:
     - checkout: self
 
-    # Install Terraform
     - task: TerraformInstaller@1
       displayName: 'Install Terraform'
       inputs:
         terraformVersion: $(TF_VERSION)
 
-    # Terraform Init (NO BACKEND)
-    - powershell: |
-        terraform init -backend=false
-      workingDirectory: environments/dev
+    - script: terraform init -backend=false
       displayName: 'Terraform Init (No Backend)'
-
-    # Terraform Format Check
-    - powershell: |
-        terraform fmt -check -recursive
       workingDirectory: environments/dev
+
+    - script: terraform fmt -check -recursive
       displayName: 'Terraform Format Check'
-
-    # Terraform Validate
-    - powershell: |
-        terraform validate
       workingDirectory: environments/dev
-      displayName: 'Terraform Validate'
 
-    # Checkov Security Scan (Advisory)
-    - powershell: |
-        python --version || exit 0
-        pip install checkov
-        checkov -d environments/dev --framework terraform || exit 0
+    - script: terraform validate
+      displayName: 'Terraform Validate'
+      workingDirectory: environments/dev
+
+    # 🔐 Security Scan (does NOT fail pipeline)
+    - script: |
+        pip3 install checkov
+        checkov -d environments/dev --framework terraform || true
       displayName: 'Terraform Security Scan (Checkov)'
       continueOnError: true
 
-# =====================================================
-# STAGE 2: COST & IMPACT ASSESSMENT (INFRACOST)
-# =====================================================
+
+############################################
+# STAGE 2: COST & IMPACT ASSESSMENT
+############################################
 - stage: Cost
   displayName: 'Cost & Impact Assessment (Infracost)'
   dependsOn: PreCommit
   condition: succeeded()
-
   jobs:
   - job: Infracost
     displayName: 'Infracost Cost Estimation'
     pool:
-      name: local-agent-pool
+      vmImage: ubuntu-latest
 
     steps:
     - checkout: self
 
-    # Install Infracost CLI (HARDENED FOR WINDOWS)
-    - powershell: |
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-
-        $installPath = "C:\Tools\infracost"
-        $exePath = "$installPath\infracost.exe"
-        $url = "https://github.com/infracost/infracost/releases/latest/download/infracost-windows-amd64.exe"
-
-        if (!(Test-Path $installPath)) {
-          New-Item -ItemType Directory -Path $installPath | Out-Null
-        }
-
-        if (!(Test-Path $exePath)) {
-          try {
-            Invoke-WebRequest -Uri $url -OutFile $exePath -UseBasicParsing
-          } catch {
-            curl.exe -L $url -o $exePath
-          }
-        }
-
-        $env:PATH += ";$installPath"
+    - script: |
+        curl -fsSL https://raw.githubusercontent.com/infracost/infracost/master/scripts/install.sh | sh
         infracost --version
       displayName: 'Install Infracost CLI'
-      continueOnError: true
 
-    # Run Infracost Breakdown
-    - powershell: |
-        if (-not $env:INFRAOST_API_KEY) {
-          Write-Host "INFRAOST_API_KEY not set. Skipping Infracost."
-          exit 0
-        }
-
-        infracost breakdown `
-          --path environments/dev `
+    - script: |
+        export INFRACOST_API_KEY=$(INFRACOST_API_KEY)
+        infracost breakdown \
+          --path environments/dev \
           --format table
       displayName: 'Run Infracost Cost Breakdown'
-      env:
-        INFRAOST_API_KEY: $(INFRAOST_API_KEY)
       continueOnError: true
 
-# =====================================================
+
+############################################
 # STAGE 3: TERRAFORM PLAN
-# =====================================================
+############################################
 - stage: Plan
   displayName: 'Terraform Plan (Dev)'
   dependsOn: Cost
   condition: succeeded()
-
   jobs:
   - job: TerraformPlan
     displayName: 'Terraform Plan'
     pool:
-      name: local-agent-pool
+      vmImage: ubuntu-latest
 
     steps:
     - checkout: self
@@ -137,22 +101,22 @@ stages:
     - task: TerraformTaskV4@4
       displayName: 'Terraform Init'
       inputs:
-        provider: azurerm
-        command: init
+        provider: 'azurerm'
+        command: 'init'
         workingDirectory: environments/dev
-        backendServiceArm: azure-terraform-conn
-        backendAzureRmResourceGroupName: rg-tf-backend
-        backendAzureRmStorageAccountName: tfstatemirhakim01
-        backendAzureRmContainerName: tfstate
-        backendAzureRmKey: dev.terraform.tfstate
+        backendServiceArm: 'azure-terraform-conn'
+        backendAzureRmResourceGroupName: 'rg-tf-backend'
+        backendAzureRmStorageAccountName: 'tfstatemirhakim01'
+        backendAzureRmContainerName: 'tfstate'
+        backendAzureRmKey: 'dev.terraform.tfstate'
 
     - task: TerraformTaskV4@4
       displayName: 'Terraform Plan'
       inputs:
-        provider: azurerm
-        command: plan
+        provider: 'azurerm'
+        command: 'plan'
         workingDirectory: environments/dev
-        environmentServiceNameAzureRM: azure-terraform-conn
+        environmentServiceNameAzureRM: 'azure-terraform-conn'
         commandOptions: >
           -input=false
           -var="location=$(LOCATION)"
@@ -160,20 +124,20 @@ stages:
           -var="admin_username=$(ADMIN_USERNAME)"
           -var="admin_password=$(ADMIN_PASSWORD)"
 
-# =====================================================
-# STAGE 4: APPLY (MANUAL APPROVAL)
-# =====================================================
+
+############################################
+# STAGE 4: APPLY (APPROVAL REQUIRED)
+############################################
 - stage: Apply
   displayName: 'Terraform Apply (Dev)'
   dependsOn: Plan
   condition: succeeded()
-
   jobs:
   - deployment: ApplyInfra
     displayName: 'Apply Terraform Infrastructure'
-    environment: dev
+    environment: dev   # 🔐 Environment approval
     pool:
-      name: local-agent-pool
+      vmImage: ubuntu-latest
 
     strategy:
       runOnce:
@@ -181,25 +145,30 @@ stages:
           steps:
           - checkout: self
 
+          - task: TerraformInstaller@1
+            displayName: 'Install Terraform'
+            inputs:
+              terraformVersion: $(TF_VERSION)
+
           - task: TerraformTaskV4@4
             displayName: 'Terraform Init'
             inputs:
-              provider: azurerm
-              command: init
+              provider: 'azurerm'
+              command: 'init'
               workingDirectory: environments/dev
-              backendServiceArm: azure-terraform-conn
-              backendAzureRmResourceGroupName: rg-tf-backend
-              backendAzureRmStorageAccountName: tfstatemirhakim01
-              backendAzureRmContainerName: tfstate
-              backendAzureRmKey: dev.terraform.tfstate
+              backendServiceArm: 'azure-terraform-conn'
+              backendAzureRmResourceGroupName: 'rg-tf-backend'
+              backendAzureRmStorageAccountName: 'tfstatemirhakim01'
+              backendAzureRmContainerName: 'tfstate'
+              backendAzureRmKey: 'dev.terraform.tfstate'
 
           - task: TerraformTaskV4@4
             displayName: 'Terraform Apply'
             inputs:
-              provider: azurerm
-              command: apply
+              provider: 'azurerm'
+              command: 'apply'
               workingDirectory: environments/dev
-              environmentServiceNameAzureRM: azure-terraform-conn
+              environmentServiceNameAzureRM: 'azure-terraform-conn'
               commandOptions: >
                 -auto-approve
                 -input=false
