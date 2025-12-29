@@ -92,9 +92,6 @@ stages:
       pool:
         name: local-agent-pool
 
-      variables:
-        INFRAOST_API_KEY: $(INFRAOST_API_KEY)
-
       steps:
         - checkout: self
 
@@ -119,8 +116,9 @@ stages:
               --format table
 
           displayName: 'Run Infracost Cost Breakdown'
+          env:
+            INFRAOST_API_KEY: $(INFRAOST_API_KEY)
           continueOnError: true
-
 
 # =====================================================
 # STAGE 3: PLAN & REVIEW
