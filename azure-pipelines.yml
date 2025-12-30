@@ -1,161 +1,98 @@
 trigger:
 - main
 
-############################################################
-# GLOBAL VARIABLES
-############################################################
-variables:
-  TF_VERSION: "1.6.6"
-  WORKING_DIR: "tf/environments/dev"
-
-############################################################
-# STAGE 1: PRE-COMMIT / STATIC & SECURITY ANALYSIS
-############################################################
 stages:
+
+# =========================================================
+# STAGE 1: PRE-COMMIT / STATIC & SECURITY ANALYSIS
+# =========================================================
 - stage: PreCommit
-  displayName: "Pre-Commit / Static & Security Analysis"
+  displayName: 'Pre-Commit / Static & Security Analysis'
   jobs:
   - job: StaticSecurity
-    displayName: "Terraform Static & Security"
+    displayName: 'Terraform Static & Security'
     pool:
-      name: linux-hosted-agent
-
+      name: linux-hosted-agent   # your Linux self-hosted agent
     steps:
     - checkout: self
 
-    # Install Terraform
-    - bash: |
-        sudo apt-get update
-        sudo apt-get install -y unzip curl
-        curl -fsSL https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip -o terraform.zip
-        unzip terraform.zip
-        sudo mv terraform /usr/local/bin/
-        terraform version
-      displayName: "Install Terraform"
+    - task: TerraformInstaller@1
+      inputs:
+        terraformVersion: '1.6.6'
 
-    # Terraform Init (no backend lock here, just validation)
-    - bash: |
+    - script: |
         terraform init -backend=false
-      workingDirectory: $(WORKING_DIR)
-      displayName: "Terraform Init (No Backend)"
+        terraform fmt -check
+        terraform validate
+      displayName: 'Terraform Validate'
+      workingDirectory: environments/dev
 
-    - bash: terraform fmt -check
-      workingDirectory: $(WORKING_DIR)
-      displayName: "Terraform Format Check"
-
-    - bash: terraform validate
-      workingDirectory: $(WORKING_DIR)
-      displayName: "Terraform Validate"
-
-    # Checkov Scan (NON-BLOCKING – ALWAYS GREEN)
-    - bash: |
-        docker run --rm \
-          -v $(pwd):/tf \
-          bridgecrew/checkov \
-          -d /tf/$(WORKING_DIR) \
-          --framework terraform || true
-      displayName: "Terraform Security Scan (Checkov)"
-      continueOnError: true
-
-############################################################
+# =========================================================
 # STAGE 2: COST & IMPACT ASSESSMENT (INFRACOST)
-############################################################
+# =========================================================
 - stage: Cost
-  displayName: "Cost & Impact Assessment (Infracost)"
+  displayName: 'Cost & Impact Assessment'
   dependsOn: PreCommit
   condition: succeeded()
   jobs:
   - job: Infracost
-    displayName: "Infracost Cost Estimation"
+    displayName: 'Infracost Cost Estimation'
     pool:
       name: linux-hosted-agent
-
     steps:
     - checkout: self
 
-    # Install Infracost CLI
-    - bash: |
-        curl -fsSL https://raw.githubusercontent.com/infracost/infracost/master/scripts/install.sh | sh
-        infracost --version
-      displayName: "Install Infracost CLI"
-
-    # Run Infracost Breakdown
-    - bash: |
-        infracost breakdown \
-          --path $(WORKING_DIR) \
+    - script: |
+        docker run --rm \
+          -e INFRACOST_API_KEY=$INFRACOST_API_KEY \
+          -v $(pwd):/code \
+          infracost/infracost breakdown \
+          --path /code/environments/dev \
           --format table
-      displayName: "Run Infracost Cost Breakdown"
-      env:
-        INFRACOST_API_KEY: $(INFRACOST_API_KEY)
+      displayName: 'Run Infracost Cost Breakdown'
 
-############################################################
+# =========================================================
 # STAGE 3: TERRAFORM PLAN
-############################################################
+# =========================================================
 - stage: Plan
-  displayName: "Terraform Plan (Dev)"
+  displayName: 'Terraform Plan (Dev)'
   dependsOn: Cost
   condition: succeeded()
   jobs:
   - job: TerraformPlan
-    displayName: "Terraform Plan"
+    displayName: 'Terraform Plan'
     pool:
       name: linux-hosted-agent
-
     steps:
     - checkout: self
 
-    - bash: |
+    - task: TerraformInstaller@1
+      inputs:
+        terraformVersion: '1.6.6'
+
+    - script: |
         terraform init
-      workingDirectory: $(WORKING_DIR)
-      displayName: "Terraform Init (Remote Backend)"
-
-    - bash: |
         terraform plan -out=tfplan
-      workingDirectory: $(WORKING_DIR)
-      displayName: "Terraform Plan"
+      displayName: 'Terraform Init & Plan'
+      workingDirectory: environments/dev
 
-############################################################
-# STAGE 4: APPROVAL GATE
-############################################################
-- stage: Approval
-  displayName: "Approval & Governance"
+# =========================================================
+# STAGE 4: TERRAFORM APPLY (MANUAL APPROVAL)
+# =========================================================
+- stage: Apply
+  displayName: 'Terraform Apply (Dev)'
   dependsOn: Plan
   condition: succeeded()
   jobs:
-  - job: ManualApproval
-    displayName: "Manual Approval"
-    pool: server
-    steps:
-    - task: ManualValidation@0
-      inputs:
-        notifyUsers: |
-          your.email@company.com
-        instructions: "Please review Terraform plan and approve to proceed."
-        onTimeout: reject
-        timeoutInMinutes: 1440
-
-############################################################
-# STAGE 5: TERRAFORM APPLY
-############################################################
-- stage: Apply
-  displayName: "Terraform Apply (Dev)"
-  dependsOn: Approval
-  condition: succeeded()
-  jobs:
-  - job: TerraformApply
-    displayName: "Terraform Apply"
+  - job: Apply
+    displayName: 'Terraform Apply'
     pool:
       name: linux-hosted-agent
-
     steps:
     - checkout: self
 
-    - bash: |
+    - script: |
         terraform init
-      workingDirectory: $(WORKING_DIR)
-      displayName: "Terraform Init"
-
-    - bash: |
         terraform apply -auto-approve
-      workingDirectory: $(WORKING_DIR)
-      displayName: "Terraform Apply"
+      displayName: 'Terraform Apply'
+      workingDirectory: environments/dev
