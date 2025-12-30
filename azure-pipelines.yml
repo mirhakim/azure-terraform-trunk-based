@@ -1,5 +1,7 @@
 trigger:
 - none   # manual run only
+variables:
+- group: infracost-secrets
 
 stages:
 - stage: Cost
