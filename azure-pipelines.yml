@@ -1,54 +1,97 @@
 trigger:
-- none   # manual run only
+- main
+
+############################################
+# VARIABLE GROUP (MANDATORY)
+############################################
 variables:
 - group: infracost-secrets
 
+############################################
+# STAGE 1: PRE-COMMIT / STATIC & SECURITY
+############################################
 stages:
-- stage: Cost
-  displayName: 'TEST – Infracost API & Docker Validation'
-
+- stage: PreCommit
+  displayName: 'Pre-Commit / Static & Security Analysis'
   jobs:
-  - job: InfracostTest
-    displayName: 'Infracost Debug Job'
-
+  - job: StaticSecurity
+    displayName: 'Terraform Static & Security'
     pool:
-      name: linux-hosted-agent   # your self-hosted Linux agent
-
+      name: linux-hosted-agent   # <-- your self-hosted agent pool
     steps:
     - checkout: self
 
-    # --------------------------------------------------
-    # DEBUG 1: Check API key visibility
-    # --------------------------------------------------
     - bash: |
-        echo "=== DEBUG: Checking API key ==="
+        terraform --version
+      displayName: 'Verify Terraform'
+
+    - bash: |
+        terraform fmt -check
+      displayName: 'Terraform Format Check'
+
+    - bash: |
+        terraform validate
+      displayName: 'Terraform Validate'
+
+############################################
+# STAGE 2: COST & IMPACT ASSESSMENT (INFRACOST)
+############################################
+- stage: Cost
+  displayName: 'Cost & Impact Assessment (Infracost)'
+  dependsOn: PreCommit
+  condition: succeeded()
+  jobs:
+  - job: Infracost
+    displayName: 'Infracost Cost Estimation'
+    pool:
+      name: linux-hosted-agent
+    steps:
+    - checkout: self
+
+    # 🔍 DEBUG – Confirm API key is injected
+    - bash: |
         echo "INFRACOST_API_KEY length: ${#INFRACOST_API_KEY}"
         if [ -z "$INFRACOST_API_KEY" ]; then
           echo "❌ API KEY NOT AVAILABLE"
           exit 1
         else
-          echo "✅ API KEY IS AVAILABLE"
+          echo "✅ API KEY AVAILABLE"
         fi
       displayName: 'DEBUG – Verify Infracost API Key'
 
-    # --------------------------------------------------
-    # DEBUG 2: Check Docker
-    # --------------------------------------------------
+    # 🐳 Verify Docker
     - bash: |
-        echo "=== DEBUG: Docker version ==="
         docker --version
         docker ps
-      displayName: 'DEBUG – Verify Docker'
+      displayName: 'Verify Docker'
 
-    # --------------------------------------------------
-    # TEST 3: Run Infracost (REAL TEST)
-    # --------------------------------------------------
+    # 💰 Run Infracost
     - bash: |
-        echo "=== Running Infracost Cost Breakdown ==="
         docker run --rm \
-          -e INFRACOST_API_KEY="$INFRACOST_API_KEY" \
-          -v "$(pwd)/environments/dev:/tf" \
+          -e INFRACOST_API_KEY=$INFRACOST_API_KEY \
+          -v $(pwd):/workspace \
           infracost/infracost breakdown \
-          --path /tf \
+          --path /workspace/environments/dev \
           --format table
-      displayName: 'TEST – Run Infracost Cost Breakdown'
+      displayName: 'Run Infracost Cost Breakdown'
+
+############################################
+# STAGE 3: TERRAFORM PLAN
+############################################
+- stage: Plan
+  displayName: 'Terraform Plan (Dev)'
+  dependsOn: Cost
+  condition: succeeded()
+  jobs:
+  - job: TerraformPlan
+    displayName: 'Terraform Plan'
+    pool:
+      name: linux-hosted-agent
+    steps:
+    - checkout: self
+
+    - bash: |
+        cd environments/dev
+        terraform init
+        terraform plan
+      displayName: 'Terraform Init & Plan'
