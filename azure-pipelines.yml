@@ -1,98 +1,52 @@
 trigger:
-- main
+- none   # manual run only
 
 stages:
-
-# =========================================================
-# STAGE 1: PRE-COMMIT / STATIC & SECURITY ANALYSIS
-# =========================================================
-- stage: PreCommit
-  displayName: 'Pre-Commit / Static & Security Analysis'
-  jobs:
-  - job: StaticSecurity
-    displayName: 'Terraform Static & Security'
-    pool:
-      name: linux-hosted-agent   # your Linux self-hosted agent
-    steps:
-    - checkout: self
-
-    - task: TerraformInstaller@1
-      inputs:
-        terraformVersion: '1.6.6'
-
-    - script: |
-        terraform init -backend=false
-        terraform fmt -check
-        terraform validate
-      displayName: 'Terraform Validate'
-      workingDirectory: environments/dev
-
-# =========================================================
-# STAGE 2: COST & IMPACT ASSESSMENT (INFRACOST)
-# =========================================================
 - stage: Cost
-  displayName: 'Cost & Impact Assessment'
-  dependsOn: PreCommit
-  condition: succeeded()
+  displayName: 'TEST – Infracost API & Docker Validation'
+
   jobs:
-  - job: Infracost
-    displayName: 'Infracost Cost Estimation'
+  - job: InfracostTest
+    displayName: 'Infracost Debug Job'
+
     pool:
-      name: linux-hosted-agent
+      name: linux-hosted-agent   # your self-hosted Linux agent
+
     steps:
     - checkout: self
 
-    - script: |
+    # --------------------------------------------------
+    # DEBUG 1: Check API key visibility
+    # --------------------------------------------------
+    - bash: |
+        echo "=== DEBUG: Checking API key ==="
+        echo "INFRACOST_API_KEY length: ${#INFRACOST_API_KEY}"
+        if [ -z "$INFRACOST_API_KEY" ]; then
+          echo "❌ API KEY NOT AVAILABLE"
+          exit 1
+        else
+          echo "✅ API KEY IS AVAILABLE"
+        fi
+      displayName: 'DEBUG – Verify Infracost API Key'
+
+    # --------------------------------------------------
+    # DEBUG 2: Check Docker
+    # --------------------------------------------------
+    - bash: |
+        echo "=== DEBUG: Docker version ==="
+        docker --version
+        docker ps
+      displayName: 'DEBUG – Verify Docker'
+
+    # --------------------------------------------------
+    # TEST 3: Run Infracost (REAL TEST)
+    # --------------------------------------------------
+    - bash: |
+        echo "=== Running Infracost Cost Breakdown ==="
         docker run --rm \
-          -e INFRACOST_API_KEY=$INFRACOST_API_KEY \
-          -v $(pwd):/code \
+          -e INFRACOST_API_KEY="$INFRACOST_API_KEY" \
+          -v "$(pwd)/environments/dev:/tf" \
           infracost/infracost breakdown \
-          --path /code/environments/dev \
+          --path /tf \
           --format table
-      displayName: 'Run Infracost Cost Breakdown'
-
-# =========================================================
-# STAGE 3: TERRAFORM PLAN
-# =========================================================
-- stage: Plan
-  displayName: 'Terraform Plan (Dev)'
-  dependsOn: Cost
-  condition: succeeded()
-  jobs:
-  - job: TerraformPlan
-    displayName: 'Terraform Plan'
-    pool:
-      name: linux-hosted-agent
-    steps:
-    - checkout: self
-
-    - task: TerraformInstaller@1
-      inputs:
-        terraformVersion: '1.6.6'
-
-    - script: |
-        terraform init
-        terraform plan -out=tfplan
-      displayName: 'Terraform Init & Plan'
-      workingDirectory: environments/dev
-
-# =========================================================
-# STAGE 4: TERRAFORM APPLY (MANUAL APPROVAL)
-# =========================================================
-- stage: Apply
-  displayName: 'Terraform Apply (Dev)'
-  dependsOn: Plan
-  condition: succeeded()
-  jobs:
-  - job: Apply
-    displayName: 'Terraform Apply'
-    pool:
-      name: linux-hosted-agent
-    steps:
-    - checkout: self
-
-    - script: |
-        terraform init
-        terraform apply -auto-approve
-      displayName: 'Terraform Apply'
-      workingDirectory: environments/dev
+      displayName: 'TEST – Run Infracost Cost Breakdown'
