@@ -146,3 +146,4 @@ stages:
         cd environments/dev
         terraform apply -auto-approve
       displayName: 'Terraform Apply'
+
