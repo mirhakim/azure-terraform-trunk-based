@@ -61,7 +61,7 @@ stages:
       name: linux-hosted-agent
 
     # 🔐 EXPLICIT SECRET VARIABLE INJECTION (CRITICAL)
-    env:
+    
       INFRACOST_API_KEY: $(INFRACOST_API_KEY)
 
     steps:
